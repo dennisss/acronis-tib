@@ -1,0 +1,38 @@
+{
+	"name": "acronis-tib",
+	"version": "0.0.1",
+	"private": true,
+	"description": "",
+	"main": "dist/index.js",
+	"scripts": {
+		"test": "./node_modules/.bin/mocha",
+		"build": "./node_modules/.bin/tsc --project ."
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+git@github.com:dennisss/acronis-tib.git"
+	},
+	"author": {
+		"name": "Dennis Shtatnov",
+		"url": "https://github.com/dennisss"
+	},
+	"devDependencies": {
+		"@types/node": "^10.12.5",
+		"mocha": "^5.0.5",
+		"ts-node": "^7.0.1",
+		"typescript": "^3.1.6"
+	},
+	"files": [
+		"dist/**/*",
+		"README.md",
+		"LICENSE",
+		"index.js"
+	],
+	"dependencies": {
+		"@types/fs-extra": "^5.0.4",
+		"adler-32": "^1.2.0",
+		"fs-extra": "^7.0.1",
+		"fuse-bindings": "^2.11.2",
+		"tslib": "^1.9.3"
+	}
+}
