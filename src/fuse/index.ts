@@ -1,13 +1,14 @@
 
 import fs from 'fs-extra';
 import fuse from 'fuse-bindings';
-import Archive from './archive';
-import MacVolume from './mac/volume';
-import { MetaDataBox, BoxType, BlobBox } from './mac/box';
-import { FileEntry, FileType } from './mac/file_entry';
+import Archive from '../archive';
+import MacVolume from '../mac/volume';
+import { MetaDataBox, BoxType, BlobBox } from '../mac/box';
+import { FileEntry, FileType } from '../mac/file_entry';
+import { FuseReadOnlyHandler } from './read_only';
 
 
-export class FuseHandler implements fuse.MountOptions {
+export class FuseHandler extends FuseReadOnlyHandler implements fuse.MountOptions {
 	// TODO: Must wrap all of this stuff in good error checking logic
 
 	// TODO: Return EROFS for all write-operations for now
@@ -24,6 +25,7 @@ export class FuseHandler implements fuse.MountOptions {
 
 	// TODO: Actually we should mount on an archive in a specific slice
 	constructor(public archive: Archive) {
+		super();
 
 		let vol = this.archive.volumes[0] as MacVolume;
 
@@ -127,6 +129,13 @@ export class FuseHandler implements fuse.MountOptions {
 	}
 
 	/*
+	// TODO: Read-only fs logic in here
+	access = (path: string, mode: any, cb: (code: number) => void) => {
+
+	}
+	*/
+
+	/*
 	statfs = (path: string, callback: (code: number, fsStat: fuse.FSStat) => void) => {
 
 	}
@@ -181,6 +190,12 @@ export class FuseHandler implements fuse.MountOptions {
 	}
 
 	// TODO: fgetattr
+
+	// flush?(path: string, fd: number, cb: (code: number) => void): void;
+
+	// fsync?(path: string, fd: number, datasync: any, cb: (code: number) => void): void;
+
+	// fsyncdir?(path: string, fd: number, datasync: any, cb: (code: number) => void): void;
 
 	readdir = (path: string, callback: (code: number, lst: string[]) => void) => {
 
@@ -339,4 +354,8 @@ export class FuseHandler implements fuse.MountOptions {
 		return this.release(path, fd, callback);
 	}
 
+	
+
 }
+
+
