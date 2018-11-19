@@ -1,5 +1,6 @@
 import fs from 'fs-extra';
 import Volume, { VolumeVersion } from './volume';
+import Slice from './slice';
 import { ParseMacVolumeMetaFile } from './mac/meta';
 import MacVolume from './mac/volume';
 import path from 'path';
@@ -52,9 +53,13 @@ export default class Archive {
 
 			// Need to find all other files for this archive as well in the current folder (matching on the identifiers in the header)
 
+			arch.volumes = [initialVolume];
+
 
 		}
 
+
+		return arch;
 	}
 
 	async close() {

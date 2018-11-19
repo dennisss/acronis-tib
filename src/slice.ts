@@ -1,7 +1,7 @@
 
 
 
-class Slice {
+export default class Slice {
 
 
 }

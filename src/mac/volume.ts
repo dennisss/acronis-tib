@@ -32,7 +32,7 @@ export default class MacVolume extends Volume {
 
 		while(pos < stat.size) {
 		
-			let record = ParseRecord(this.fd, this.header.blockSize, pos);
+			let record = await ParseRecord(this.fd, this.header.blockSize, pos);
 	
 			let { data: chunkData } = await ReadCompressedStream(
 				this.fd, record.inner_start, record.inner_end

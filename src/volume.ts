@@ -41,9 +41,11 @@ export default abstract class Volume {
 		try {
 			header = await this.LoadHeader(fd);
 		}
-		finally {
+		catch(e) {
 			// TODO: It is annoying that this is redundant with the volume's close() function 
 			await fs.close(fd);
+
+			throw e;
 		}
 
 		let Gen = VolumeImpls[header.version];

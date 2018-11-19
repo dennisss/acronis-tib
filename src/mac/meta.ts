@@ -27,7 +27,7 @@ export async function ParseMacVolumeMetaFile(file: number): Promise<MacVolumeMet
 		}
 
 
-		let record = ParseRecord(file, blockSize, pos);
+		let record = await ParseRecord(file, blockSize, pos);
 
 		if(record.flags === 0x88) {
 			let { data: chunkData } = await ReadCompressedStream(

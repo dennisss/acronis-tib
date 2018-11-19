@@ -222,7 +222,7 @@ export function ParseBox(data: Buffer, pos: number): Box {
 
 		let files: FileEntry[] = []
 
-		while(bodyPos < inner_end) {
+		while(bodyPos < inner_end - 3) {
 			// TODO: Instead these should be called directory entries (or fs entries?)
 			let file = ParseFileEntry(data, bodyPos);
 			files.push(file);

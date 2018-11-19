@@ -50,7 +50,7 @@ export interface Record {
 }
 
 // TODO: Need to eventually have good support for detecting going over the end of the file for the purposes of recovering from incomplete archives
-export async function ParseRecord(file: number, blockSize: number, pos: number): Record {
+export async function ParseRecord(file: number, blockSize: number, pos: number): Promise<Record> {
 
 	let start = pos;
 
