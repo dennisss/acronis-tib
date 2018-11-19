@@ -1,8 +1,6 @@
 import assert from 'assert';
+import { BoxHandle } from './box';
 
-
-/** Amount of space the handle struct takes up when serialized in the metadata */
-const BOX_HANDLE_SIZEOF = 32;
 
 export enum FileType {
 	Regular = 0,
@@ -21,22 +19,6 @@ export interface AbstractFileEntry {
 	mtime: Date;
 
 	handles: BoxHandle[];
-}
-
-
-/**
- * This is a reference to a specific box in the main archive
- */
-export interface BoxHandle {
-	type: number; /**< Type of the box */
-
-	record_start: number; /**< In the main archive, this is the offset of the starting block for the record containing this data. This is relative to the first data block (so 0 is usually at 3*4096 in the file) */
-
-	record_size: number; /**< Total number of bytes taken up in the main archive (typically will be a multiple of the block size) */
-
-	start: number; /**< Start offset of box in the decompressed data */
-
-	size: number; /**< Size of the box starting at the above start offset */
 }
 
 export interface DirectoryFileEntry extends AbstractFileEntry {
@@ -175,7 +157,7 @@ export function ParseFileEntry(data: Buffer, pos: number): FileEntry {
 	let handles: BoxHandle[] = [];
 	if(isFile) {
 		// TODO: Some directories should be able to have boxes too right? (for attributes)
-		handles = parseBoxHandles(data, pos, handlesSize);	
+		handles = parseBoxHandles(data, pos, handlesSize);
 	}
 	
 	pos += handlesSize;

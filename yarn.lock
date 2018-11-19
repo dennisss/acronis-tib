@@ -96,10 +96,9 @@ fs.realpath@^1.0.0:
   resolved "https://registry.yarnpkg.com/fs.realpath/-/fs.realpath-1.0.0.tgz#1504ad2523158caa40db4a2787cb01411994ea4f"
   integrity sha1-FQStJSMVjKpA20onh8sBQRmU6k8=
 
-fuse-bindings@^2.11.2:
+"fuse-bindings@https://github.com/dennisss/fuse-bindings.git#46279f0c864af21c95f7c6b3b466b7f73f459036":
   version "2.11.2"
-  resolved "https://registry.yarnpkg.com/fuse-bindings/-/fuse-bindings-2.11.2.tgz#ce1f2e8d18beab589d34d52bc3025a7e26ac747d"
-  integrity sha512-53gc5h3VDYY9QmFu4tFU9NgKfR51AgKGhl7Uj1EX63RDU5kiBo2ooDvBiuawlS/iyEprUnzjlcDny1N/VhWNnA==
+  resolved "https://github.com/dennisss/fuse-bindings.git#46279f0c864af21c95f7c6b3b466b7f73f459036"
   dependencies:
     nan "^2.3.5"
     node-gyp-build "^3.2.2"

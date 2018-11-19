@@ -11,7 +11,7 @@ export enum BoxType {
 	// In the main file
 	Unknown = 0, // < NOTE: This is the only one that doesn't correspond to an actual byte of data
 	Container = 0x01C0,
-	Blob = 0x04C0,
+	Blob = 0x04C0, // NOTE: For blobs, this there will 9bytes before the actual data in the box
 	StatTime = 0x05C0,
 	StatUser = 0x06C0,
 	Attributes = 0x07C0,
@@ -19,6 +19,23 @@ export enum BoxType {
 	// In the metadata file
 	MetaIndex = 0x0070,
 	MetaData = 0x0040
+}
+
+/**
+ * This is a reference to a specific box in the main volume file
+ * 
+ * NOTE: These are stored in the metafile (so see that information for more information)
+ */
+export interface BoxHandle {
+	type: number; /**< Type of the box */
+
+	record_start: number; /**< In the main archive, this is the offset of the starting block for the record containing this data. This is relative to the first data block (so 0 is usually at 3*4096 in the file) */
+
+	record_size: number; /**< Total number of bytes taken up in the main archive (typically will be a multiple of the block size) */
+
+	start: number; /**< Start offset of box in the decompressed data */
+
+	size: number; /**< Size of the box starting at the above start offset */
 }
 
 export interface OpaqueBox {
@@ -91,6 +108,7 @@ export function ParseBox(data: Buffer, pos: number): Box {
 	}
 
 
+	// TODO: Actually there is a 1 byte 0xC0 and then 4 bytes of actual type information (so the type is a uint32)
 	let rawType = data.readUInt16LE(pos); pos += 2; size -= 2;
 
 	let type = rawType;
