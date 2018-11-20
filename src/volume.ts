@@ -11,6 +11,8 @@ export enum VolumeVersion {
 }
 
 export interface VolumeHeader {
+	rawBytes: Buffer; 
+
 	length: number; /**< Length in bytes of the header */
 	version: VolumeVersion;
 	sequence: number; /**< The index of the volume in the slice */
@@ -62,7 +64,7 @@ export default abstract class Volume {
 
 	private static async LoadHeader(fd: number): Promise<VolumeHeader> {
 
-		let headerBlock = Buffer.allocUnsafe(256); // < Just to be safe this is way more than the 36 bytes that the usual Mac header would take up
+		let headerBlock = Buffer.allocUnsafe(64); // < Just to be safe this is way more than the 36 bytes that the usual Mac header would take up
 		await fs.read(fd, headerBlock, 0, headerBlock.length, 0);
 	
 		let magic = headerBlock.readUInt32LE(0);
@@ -85,10 +87,13 @@ export default abstract class Volume {
 	
 		for(let i = headerLength; i < 0x24; i++) { headerBlock[i] = 0; } // This is mainly to simulate the current version of True Image exactly
 	
-		// Remove checksume from buffer for computing checksum
+		// Remove checksum from buffer for computing checksum
 		headerBlock.writeUInt32LE(0, 0x18);
 	
 		let sumNum: number = ComputeAdler32(headerBlock.slice(0, headerLength));
+
+		// Restore the checksum so that we can store the pristine header bytes
+		headerBlock.writeUInt32LE(headerSum, 0x18);
 
 		let isSumValid = sumNum === headerSum;
 	
@@ -98,6 +103,7 @@ export default abstract class Volume {
 		let blockSize = headerBlock.readUInt32LE(0x1c);
 	
 		return {
+			rawBytes: headerBlock.slice(0, headerLength),
 			length: headerLength,
 			version: version,
 			archiveId: identifiers.slice(0, 4),

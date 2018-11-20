@@ -51,6 +51,11 @@ interface RecordHandle {
 	hash: Buffer; /**< 16byte MD5 hash of the decompressed block */
 }
 
+interface VolumeFooter {
+	isValid: boolean;
+	metaDataOffset: number;
+}
+
 
 export class Windows2015Volume extends Volume {
 
@@ -58,6 +63,64 @@ export class Windows2015Volume extends Volume {
 		return new Windows2015Volume();
 	}
 
+	footer: VolumeFooter;
+
+	/**
+	 * Volumes will be a footer that can be used to verify that the volume is completely written and allows for seeking directly to the metadata without needing to read the entire file
+	 */
+	async loadFooter() {
+		let stat = await fs.fstat(this.fd);
+		if(stat.size < 90) {
+			// Shouldn't be possible for this to be meaninfully possible
+		}
+
+		if(stat.size % this.header.blockSize !== 0) {
+			// Most likely an invalid file (did not finish being written)
+		}
+
+		let buf = Buffer.allocUnsafe(48);
+		await fs.read(this.fd, buf, 0, 48, stat.size - 48);
+
+		let isValid = true;
+
+		// The end of the file should contain an exact mirror image of the header
+		for(var i = 0; i < this.header.length; i++) {
+			if(this.header.rawBytes[i] !== buf[buf.length - i]) {
+				isValid = false;
+				break;
+			}
+		}
+
+		let isValidOffset = (v: number) => {
+			return v >= this.header.length && v < (stat.size - this.header.length);
+		}
+
+		// NOTE: This is a 64bit number
+		let off = buf.readUIntLE(buf.length - this.header.length - 8, 6);
+
+		// For whatever reason, the value we actually want is 20 bytes after the previous value
+		off += 20;
+
+		let metaDataOffset = -1;
+
+		// Check the offset is in the file
+		if(isValidOffset(8) && ((off + 8) < stat.size - this.header.length)) {
+			await fs.read(this.fd, buf, 0, 8, off);
+			metaDataOffset = buf.readUIntLE(0, 6); // Also a 64bit number
+			if(!isValidOffset(metaDataOffset)) {
+				isValid = false;
+			}
+		}
+		else {
+			isValid = false;
+		}
+
+		this.footer = {
+			isValid,
+			metaDataOffset
+		};
+	}
+	
 
 	async read(outputFolder: string) {
 
@@ -248,11 +311,13 @@ export class Windows2015Volume extends Volume {
 
 		}
 
+		/*
+			XXX: Need to validate that the last bytes of the file are the same as the first 32bytes of header (to validate integrity)
+
+		*/
+		
 
 	}
-
-
-
 
 }
 

@@ -49,10 +49,11 @@ export interface Record {
 	inner_end: number; /**< End of the compressed block (usually 4 bytes before end) */
 }
 
-// TODO: Need to eventually have good support for detecting going over the end of the file for the purposes of recovering from incomplete archives
-export async function ParseRecord(file: number, blockSize: number, pos: number): Promise<Record> {
+const RECORD_HEADER_SIZEOF = 4;
+const RECORD_TRAILER_SIZEOF = 4;
 
-	let start = pos;
+
+async function ParseRecordHeader(file: number, pos: number): Promise<{ header_size: number; flags: number }> {
 
 	let header = Buffer.allocUnsafe(4);
 	await fs.read(file, header, 0, 4, pos); pos += 4;
@@ -62,26 +63,40 @@ export async function ParseRecord(file: number, blockSize: number, pos: number):
 		console.warn('Unknown record flags: ' + flags.toString(16));
 	}
 
-	// Data starts after the header
-	let inner_start = pos;
+	let header_size = header.readUIntLE(1, 3); // Uint24
 
-	let size = header.readUIntLE(1, 3); // Uint24
-	pos += size;
+	return { header_size, flags };
+}
 
-
-	let end = pos;
-	let inner_end = pos - 4;
-
+async function ParseRecordTrailer(file: number, pos: number): Promise<{ trailer_size: number }> {
 	let trailer = Buffer.allocUnsafe(4);
-	await fs.read(file, trailer, 0, 4, inner_end);
+	await fs.read(file, trailer, 0, 4, pos);
 
 	if(trailer[0] !== 0x78) {
 		console.warn('Unknown trailer flags');
 	}
 
 	let trailer_size = trailer.readUIntLE(1, 3); // Uint24
-	if(trailer_size !== size) {
-		throw new Error('Invalid trailer');
+
+	return { trailer_size };
+}
+
+
+// TODO: Need to eventually have good support for detecting going over the end of the file for the purposes of recovering from incomplete archives
+export async function ParseRecord(file: number, blockSize: number, pos: number): Promise<Record> {
+
+	let start = pos;
+	let inner_start = start + RECORD_HEADER_SIZEOF;
+
+	let { header_size, flags } = await ParseRecordHeader(file, start);
+	
+	let end = inner_start + header_size;
+	let inner_end = end - RECORD_TRAILER_SIZEOF;
+
+	let { trailer_size } = await ParseRecordTrailer(file, inner_end);
+	
+	if(header_size !== trailer_size) {
+		throw new Error('Invalid header/trailer')
 	}
 
 	if(end % blockSize !== 0) {
@@ -89,13 +104,44 @@ export async function ParseRecord(file: number, blockSize: number, pos: number):
 	}
 
 	return {
-		flags: flags,
-		start: start,
-		end: end,
-		inner_start: inner_start,
-		inner_end: inner_end
+		flags,
+		start, end,
+		inner_start, inner_end
 	};
 }
+
+/**
+ * Given the end offset of a record, this will parse it backwards starting at the trailer and deriving the start of the record
+ * 
+ * This is basically an opposite version of the above ParseRecord function
+ */
+export async function ParseReverseRecord(file: number, blockSize: number, pos: number) {
+	
+	let end = pos;
+	let inner_end = end - RECORD_TRAILER_SIZEOF;
+
+	if(end % blockSize !== 0) {
+		console.warn('Record does not end at a block offset');
+	}
+
+	let { trailer_size } = await ParseRecordTrailer(file, inner_end);
+
+	let start = inner_end - trailer_size;
+	let inner_start = start + RECORD_HEADER_SIZEOF;
+		
+	let { header_size, flags } = await ParseRecordHeader(file, start);
+
+	if(header_size !== trailer_size) {
+		throw new Error('Invalid header/trailer')
+	}
+	
+	return {
+		flags,
+		start, end,
+		inner_start, inner_end
+	};
+}
+
 
 
 // Gets all boxes from inside a chunk

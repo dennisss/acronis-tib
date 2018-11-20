@@ -18,7 +18,7 @@ export enum BoxType {
 
 	// In the metadata file
 	MetaIndex = 0x0070,
-	MetaData = 0x0040
+	MetaData = 0x0040 // < More specifically this is metadata for a single Slice?
 }
 
 /**
@@ -214,26 +214,55 @@ export function ParseBox(data: Buffer, pos: number): Box {
 		let inner_end = inner_start + inner_size;
 		// TODO: There is still a lot of info after this as well
 
-		let bodyPos = inner_start + 159;
-		function readU16String(eos = 0x00) {
-			let start = bodyPos;
-			while(data[bodyPos] !== eos) {
-				bodyPos += 2;
+		// TODO: Export this stuff somewhere
+		let uuidPosition = inner_start + 53;
+		let slice_id = data.slice(uuidPosition, uuidPosition + 16);
+
+		console.log('SLICE ID', slice_id);
+
+		let datePosition = uuidPosition + 16;
+		let sliceCreationTime = data.readUIntLE(datePosition, 6); // 64bit
+		// TODO: Convert to date
+
+
+		// This says '<?xml' in unicode
+		const xmlMagic = Buffer.from('FFFE3C003F0078006D006C', 'hex');
+
+		// We currently don't know how to parse everything before the xml string, so we will just try to find the xml string and then go from there
+		let foundXml = false;
+		let bodyPos = inner_start + 100;
+		while(bodyPos < inner_end) {
+			if(data.slice(bodyPos, bodyPos + xmlMagic.length).equals(xmlMagic)) {
+				foundXml = true;
+
+				// Go back 2 spaces (because we do know that the length of the xml is immediately before it)
+				bodyPos -= 2;
+				break;
 			}
 
-			let end = bodyPos;
-
-			let str = data.slice(start, end).toString('utf16le');
-			bodyPos += 2; // Skip EOS marker
-
-			return str;
+			bodyPos++;
 		}
 
-		let xml = readU16String();
+		// NOTE: For a normal backup of just plain files, 'bodyPos == inner_start + 155' right here
 
-		bodyPos += 6;
+		if(!foundXml) {
+			throw new Error('Could not find the configuration xml');
+		}
+
+		let xmlSize = data.readUInt16LE(bodyPos); bodyPos += 2; // Size of xml in bytes
+
+		let xml = data.slice(bodyPos, bodyPos + xmlSize).toString('utf16le');
+		bodyPos += xmlSize;
 
 
+
+		// I don't know why this is, but there is clearly a vector of some kind immediately after the 
+		if(data[bodyPos] !== 0) {
+			bodyPos += 52;
+		}
+		else {
+			bodyPos += 8;
+		}
 
 
 		// TODO: Ideally slice to the size of the maximum size we can handle based on the current directory

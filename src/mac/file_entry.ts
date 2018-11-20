@@ -92,7 +92,16 @@ export function ParseFileEntry(data: Buffer, pos: number): FileEntry {
 
 	if(data[pos + 4] === 0x40) {
 		// XXX: Only seems to occur for the first block
-		pos += 32;
+
+		pos += 10;
+
+		let stringSize = data.readUInt16LE(pos); pos += 2;
+
+		pos += 6; // TODO: 0x06 is also right before the 0x40 we observed above
+
+		pos += stringSize*2;
+
+		pos += 4; // Unknown 32bit number?
 	}
 	else {
 		pos += 8;

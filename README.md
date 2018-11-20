@@ -24,7 +24,7 @@ Versions
 
 The objective is to support all versions of the file format. As of right now the Mac and Windows versions produce relatively different file formats (thus likely why True Image does not natively allow for cross-os archive viewing).
 
-Judging by the backwards compatibility information located here (https://kb.acronis.com/tib), the following distinct variants of the file format (each number listed below is the version year of True Image):
+Judging by the backwards compatibility information located here (https://kb.acronis.com/tib), the following distinct variants of the file format exist in the wild (each number listed below is the version year of True Image):
 1. Windows `<= 2012`
 2. Windows `>= 2013 and <= 2014`
 3. Windows `>= 2015 to present`
