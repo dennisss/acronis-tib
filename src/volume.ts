@@ -17,11 +17,10 @@ export interface VolumeHeader {
 	version: VolumeVersion;
 	sequence: number; /**< Index of this file in the archive. Incremented every single time a new file is created whether it be a volume, slice, etc. These provide a total ordering of alla files in an archive */
 	
-	// XXX: Not actually called identifiers (that word is reserved for the other ids) (we do already know the sliceId for sure)
-	archiveId: Buffer; /**< Random 4byte identifier common to all files in this volume */
-	sliceId: Buffer; /**< Random 4bytes to identify this slice */
-	// NOTE: This
-	volumeId: Buffer; /**< Random 4bytes to identify this volume (NOTE: this is the only id I am fairly vertain about. the other two above I know are usually the same, but I am still unsure) */
+	// NOTE: I don't call these identifiers, because TI has separate 16-byte UUIDs stored in the files to be the identifiers
+	archiveKey: Buffer; /**< Random 4byte identifier common to all files in this volume */
+	sliceKey: Buffer; /**< Random 4bytes to identify this slice */
+	volumeKey: Buffer; /**< Random 4bytes to identify this volume */
 
 	checkSumValid: boolean; /**< Whether or the checksum of the header is valid */
 	
@@ -107,9 +106,9 @@ export default abstract class Volume {
 			rawBytes: headerBlock.slice(0, headerLength),
 			length: headerLength,
 			version: version,
-			archiveId: identifiers.slice(0, 4),
-			sliceId: identifiers.slice(4, 8),
-			volumeId: identifiers.slice(8, 12),
+			archiveKey: identifiers.slice(0, 4),
+			sliceKey: identifiers.slice(4, 8),
+			volumeKey: identifiers.slice(8, 12),
 			sequence: sequence,
 			checkSumValid: isSumValid,
 			blockSize: blockSize

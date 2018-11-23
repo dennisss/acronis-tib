@@ -17,6 +17,8 @@ Normalization
 
 Acronis will include absolute paths in some of the backup types. In order to make the .tib files more reproducible, we will attempt to control the original location of the files and other parameters.
 
+NOTE: If you want to regenerate these files, delete the old .tib files dirst so that acronis doesn't create a second version on top of the original ones
+
 ### Mac
 
 - When making file/folder based backups, we will always backup from `/opt/archive/[data-name]`
