@@ -44,7 +44,7 @@ export async function ParseMacVolumeMetaFile(file: number): Promise<MacVolumeMet
 			// Usually is the first record and i don't know what it means
 		}
 		else {
-			console.warn('Unknown record flags:', record.flags);
+			console.warn('(META) Unknown record flags:', record.flags);
 		}
 
 		pos = record.end;

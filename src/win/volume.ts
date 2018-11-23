@@ -15,12 +15,10 @@ const RECORD_INDEX_MAGIC = Buffer.from('0102001001000000', 'hex');
 enum RecordType {
 	Config = 101, /**< Contains xml configuration data key-value pairs */
 	Listing = 103, /**< Contains a list of all files/directories in the archive */
+	EndTrailer = 104, /**< Indicates the start of the end index that is referenced by the footer and holds a summary of where the important metadata blocks are located in the list (this means nothing else meaninful is left in the file. Generally we don't need to parse this if we are going forward as this should have been referenced already if we had loaded the footer of the file) */
 	RecordIndex = 108, /**< For regular files, this contains the index of where each record holding data for it is located */
 	Blob = 109, /**< Contains file data */
-	BlobTrailer = 110, /**< This is inserted after every single blob for a file has been written (usaully empty but may contain metadata?) */
-
-	// TODO: I am currently unsure of this, but it does make sense for this to be like this (either it is an EOS indicator or an indicator for the trailer bytes for the file)
-	EndOfRecords = 124
+	BlobSuffix = 110, /**< This is inserted after every single blob for a file has been written (usaully empty but may contain metadata?) */
 }
 
 interface ConfigAttribute {
@@ -173,7 +171,7 @@ export class Windows2015Volume extends Volume {
 				// 4 byte checksum of something?
 				pos += 4;
 			}
-			else if(type === RecordType.EndOfRecords) {
+			else if(type === RecordType.EndTrailer) {
 				break;
 			}
 			else {

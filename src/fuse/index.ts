@@ -109,7 +109,7 @@ export class FuseHandler extends FuseReadOnlyHandler implements fuse.MountOption
 				}
 			}
 
-			// Otherwise, just keep moing along as usual
+			// Otherwise, just keep moving along as usual
 			if(f.type === FileType.Directory) {
 				i += f.numEntries;
 			}
