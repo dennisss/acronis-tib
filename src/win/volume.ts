@@ -14,6 +14,10 @@ const RECORD_INDEX_MAGIC = Buffer.from('0102001001000000', 'hex');
 
 enum RecordType {
 	Config = 101, /**< Contains xml configuration data key-value pairs */
+	FirstFileMetaRecord = 102, /**< I don't know what this record contains but it is referenced by a single FileEntry and is followed by the rest fo the relevant  */
+	FileMetaA = 1, /**< Typically will follow the FirstFileMetaRecord */
+	FileMetaB = 2, /**< Typically will follow the FileMetaA */
+	FileMetaC = 5, /**< Typically will follow the FileMetaB */
 	Listing = 103, /**< Contains a list of all files/directories in the archive */
 	EndTrailer = 104, /**< Indicates the start of the end index that is referenced by the footer and holds a summary of where the important metadata blocks are located in the list (this means nothing else meaninful is left in the file. Generally we don't need to parse this if we are going forward as this should have been referenced already if we had loaded the footer of the file) */
 	RecordIndex = 108, /**< For regular files, this contains the index of where each record holding data for it is located */
@@ -36,7 +40,7 @@ interface FileEntry {
 	fileSize: number; // NOTE: If there are zeros at the end of the file, then i think that it will clip them and assume that everything overflowing the available data is zeros
 	fileSize2: number;
 
-	metaOffset: number; /**< Offset relative to after the header of the '102' record type for this entry */
+	metaOffset: number; /**< Offset relative to after the header of the RecordType.FirstFileMetaRecord for this entry. Reading sequential  */
 
 }
 
@@ -51,7 +55,7 @@ interface RecordHandle {
 
 interface VolumeFooter {
 	isValid: boolean;
-	metaDataOffset: number;
+	metaDataOffset: number; /**< This will be the offset of the RecordType.Config block relative to end of the file header */
 }
 
 
@@ -147,14 +151,17 @@ export class Windows2015Volume extends Volume {
 
 			let data: Buffer;
 
+			if(type === RecordType.EndTrailer) {
+				break;
+			}
 			// Zlib stream encoded
-			if(type === 109 || type === 110 || type === 108) {
+			if(type === RecordType.Blob || type === RecordType.BlobSuffix || type === RecordType.RecordIndex) {
 				let res = await ReadCompressedStream(this.fd, pos, -1);
 				data = res.data;
 				pos += res.length;
 			}
 			// Raw deflate encoded
-			else if(type === 101 || type === 102 || type === 103 || type === 104 || type === 1 || type === 2 || type === 5) {
+			else if(type === RecordType.Config || type === 102 || type === 103 || type === 1 || type === 2 || type === 5) {
 				let res = await ReadCompressedStream(this.fd, pos, -1, true);
 				data = res.data;
 				pos += res.length;
@@ -170,9 +177,6 @@ export class Windows2015Volume extends Volume {
 	
 				// 4 byte checksum of something?
 				pos += 4;
-			}
-			else if(type === RecordType.EndTrailer) {
-				break;
 			}
 			else {
 				// NOTE: We currently don't know of any record types that aren't compressed 
