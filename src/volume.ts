@@ -15,8 +15,9 @@ export interface VolumeHeader {
 
 	length: number; /**< Length in bytes of the header */
 	version: VolumeVersion;
-	sequence: number; /**< The index of the volume in the slice */
+	sequence: number; /**< Index of this file in the archive. Incremented every single time a new file is created whether it be a volume, slice, etc. These provide a total ordering of alla files in an archive */
 	
+	// XXX: Not actually called identifiers (that word is reserved for the other ids) (we do already know the sliceId for sure)
 	archiveId: Buffer; /**< Random 4byte identifier common to all files in this volume */
 	sliceId: Buffer; /**< Random 4bytes to identify this slice */
 	// NOTE: This

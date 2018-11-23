@@ -3,3 +3,7 @@
 node_modules
 .DS_Store
 dist/*
+knowledge_base
+out
+ext
+mnt

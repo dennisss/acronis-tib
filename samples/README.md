@@ -3,43 +3,80 @@ Sample .tib files
 
 This folder contains sample tib files along with the exact well-known payloads archived into them. As the parsing code is fairly offset driven, use these as references for understanding why certain offsets in the code are what they are.
 
+
+Contributing
+------------
+
+If you have an interesting `.tib` file that covers a case we aren't testing or can't handle yet, we'd love to hear about it.
+
+DO NOT commit binaries or archives to this repository. Instead submit a pull request to this repository with the documentation for the archive settings and original data, how to reproduce it, etc. and include in the description of the pull request publically accessible http links to the data/tib files. They will be separately ingested into the main Google Cloud Storage bucket when the pull request is accepted.
+
+
 Normalization
 -------------
 
 Acronis will include absolute paths in some of the backup types. In order to make the .tib files more reproducible, we will attempt to control the original location of the files and other parameters.
 
+### Mac
 
-Mac
----
+- When making file/folder based backups, we will always backup from `/opt/archive/[data-name]`
+	- Creating the folder initially is why you need your password to run the scripts
+	- NOTE: We can't extract to folders like `/tmp/` as TI is smart enough to completely ignore those folders
 
-- Payload files should be extracted to `/opt/archive/` and backed up from there
-- True Image for Mac doesn't have many settings to deal with, but we mainly stick to the default ones except we disable scheduling in the settings menu.
-
-
-Windows
--------
+- Scheduling should be disabled in the per-archive options
+- All backups unencrypted until we support that
 
 
-Index
------
+### Windows
 
-TODO: Create a sample with file exclusions added (they are probably stored as a list in the archive file)
-
-NOTE: If you want to regenerate these files, delete the old .tib files dirst so that acronis doesn't create a second version on top of the original ones
-
-- `mac/chess` archive
-	- Run `extract_data.sh` in this directory as the working directory
-	- Create a 
-	-  // Created using True Image 2018 23.3.14170 on macOS
-	- Created using True Image 2019 
-	- Make sure the backup is called 
-
-- Payload 1: `data/chess-*.zip`
-	- A clone of this repository https://github.com/dennisss/chess at commit 675ab918 without the `.git` repo
-	- Can be redownloaded from https://github.com/dennisss/chess/archive/675ab91843499aa0b7e18293f1bbe7464b05a9c1.tar.gz
-	- Permissions when extracted should be:
-		- 775 for directories
-		- 664 for files
+- When making file/folder based backups, we will always backup from `C:\Users\Acronis\[data-name]`
+- Most sample archives should be submitted in both compressed and uncompressed form.
 
 
+Sample Data
+-----------
+
+- `data/chess-*.zip`
+	- A clone of this repository https://github.com/dennisss/chess at a few commit points without the `.git` repo
+	- A bunch of source code files to test general directory support
+
+- `data/gpt-efi.img`
+	- Extracted from a Windows 10 VM raw disk
+	- Consists of the all sectors of the disk through the GPT partition table and the first EFI partition
+	- Annotated with the string `ENDEND` at the very end of the image to help locating the end of the parition in the archives
+	- For sample archives of this data, incremental backups are created by overwriting bytes at offset 0xC8FFFEA (16 bytes before the beginning of the `ENDEND` string) with the ASCII characters `CHANGE` before starting the second backup
+	- Only meaningful to use this for the Windows Sector-By-Sector Mode
+
+
+Sample Archives
+---------------
+
+### Chess Samples
+
+The `./extract_data.[sh|bat]` scripts are used to extract and position the data in the standard data dir. Then two backups (one full and one incremental) are taken on each OS. 
+
+- `mac/chess-a`
+	- Created with True Image 2019 for Mac
+	- Based on the first of the `data/chess-*.zip` files
+	- Permissions 755 (directories), 644 (files)
+	- File owner: `user:staff` (uid: 501, gid: 20)
+	- XAttrs: Single `com.apple.quarantine` attribute on each file 
+
+- `mac/chess-b`
+	- Same as `chess-a` but with an incremental backup appended to it with the second commit of the dataset
+	- AKA: This file holds two different slices / snapshots in time
+
+- `win/chess*`
+	- Created with True Image 2019 for Windows
+	- Windows version of the Mac ones above
+
+
+### GPT-EFI Samples
+
+- `win/gpt-efi-cmp`
+	- Compressed (high) full disk "Sector-By-Sector" backup of a disk with the image's contents
+	- Unallocated sectors also archived
+
+- `win/gpt-efi-raw`
+	- Same as the first one, but with compression disabled
 

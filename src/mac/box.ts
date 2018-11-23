@@ -18,7 +18,9 @@ export enum BoxType {
 
 	// In the metadata file
 	MetaIndex = 0x0070,
-	MetaData = 0x0040 // < More specifically this is metadata for a single Slice?
+	MetaData = 0x0040, // < More specifically this is metadata for a single Slice?
+
+	Empty = -1
 }
 
 /**
@@ -85,8 +87,12 @@ export interface MetaDataBox extends OpaqueBox {
 	files: FileEntry[]; // TODO: Eventually we will require that these be parsed separately after reading the initial outer box
 }
 
+export interface EmptyBox extends OpaqueBox {
+	type: BoxType.Empty;
+}
 
-export type Box = UnknownBox | ContainerBox | BlobBox | StatTimeBox | StatUserBox | AttributesBox | MetaDataBox;
+
+export type Box = UnknownBox | ContainerBox | BlobBox | StatTimeBox | StatUserBox | AttributesBox | MetaDataBox | EmptyBox;
 
 
 
@@ -103,7 +109,17 @@ export function ParseBox(data: Buffer, pos: number): Box {
 	*/
 
 	let size = data.readUIntLE(pos, 3); pos += 3; // Uint24
-	if(size < 2) {
+	
+	// Zero-length boxes do seem to actually exist
+	if(size === 0) {
+		return {
+			start,
+			end: pos,
+			type: BoxType.Empty
+		};	
+	}
+	// But if we don't have enough bytes to represent the type of box, then it is definately wrong
+	else if(size < 2) {
 		throw new Error('Unexpected small box');
 	}
 
