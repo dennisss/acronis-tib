@@ -1,5 +1,6 @@
 import assert from 'assert';
 import { BoxHandle } from './box';
+import { Reader } from '../reader';
 
 
 export enum FileType {
@@ -33,23 +34,25 @@ export interface RegularFileEntry extends AbstractFileEntry {
 export type FileEntry = RegularFileEntry | DirectoryFileEntry;
 
 
-function parseBoxHandles(data: Buffer, start: number, size: number): BoxHandle[] {
-	let pos = start;
+async function readBoxHandles(reader: Reader, size: number): Promise<BoxHandle[]> {
+
+	let start = reader.pos();
 
 	let handles: BoxHandle[] = [];
 
-	while(pos < start + size) {
-		let type = data.readUInt32LE(pos); pos += 4;
+	while(reader.pos() < start + size) {
+		let type = await reader.readUint32();
 
-		let len = data.readUInt32LE(pos); pos += 4;
+		let len = await reader.readUint32();
+
+		let innerStart = reader.pos();
 
 		// NOTE: One type of box can be split across multiple records (usually only for Blob boxes for large files)
-		let innerPos = pos;
-		while(innerPos < pos + len) {
-			let record_start = data.readUIntLE(innerPos, 6); innerPos += 8;
-			let start = data.readUInt32LE(innerPos); innerPos += 4;
-			let size = data.readUInt32LE(innerPos); innerPos += 4;
-			let record_size = data.readUInt32LE(innerPos); innerPos += 4;
+		while(reader.pos() < innerStart + len) {
+			let record_start = await reader.readUint64();
+			let start = await reader.readUint32();
+			let size = await reader.readUint32();
+			let record_size = await reader.readUint32();
 
 			handles.push({
 				type: type,
@@ -60,65 +63,71 @@ function parseBoxHandles(data: Buffer, start: number, size: number): BoxHandle[]
 			});
 		}
 
-		assert.equal(innerPos, pos + len);
-		pos = innerPos;
+		assert.equal(reader.pos(), innerStart + len);
 
 		// Each handle ends with 4 bytes that are usually 0 but i'm not sure what they do
-		pos += 4;
+		reader.skip(4);
 	}
 
 	// Making sure we consumed the right number of bytes
-	assert.equal(pos, start + size);
+	assert.equal(reader.pos(), start + size);
 
 	return handles;
 }
 
 // Reads a file entry that must start at the given position and end before some other position
-export function ParseFileEntry(data: Buffer, pos: number): FileEntry {
+export async function ReadFileEntry(reader: Reader): Promise<FileEntry> {
 
-	let start = pos;
+	let start = reader.pos();
 
 	// Each file starts with some type of prefix. This is a uint32 defining the length of the prefix followed by the actual prefix data
-	let prefixSize = data.readUInt32LE(pos); pos += 4;
-	pos += prefixSize;
+	let prefixSize = await reader.readUint32();
+
+	reader.skip(prefixSize);
 
 	// Next is the size of the entire entry (inclusive of all entries inside of it and inclusive of these 4 bytes)  
-	let restSize = data.readUInt32LE(pos); pos += 4;
+	let restSize = await reader.readUint32();
 	// Jumping to this offset could be used for skipping this file/directory in the fs tree
-	let extent = pos - 4 + restSize;
+	let extent = reader.pos() - 4 + restSize;
 
 	// Number of extra bytes at the end of this entry which we don't know the purpose of yet
 	//let trailerSize = data.readUInt32LE(pos); pos += 4;
 
-	if(data[pos + 4] === 0x40) {
+	// Peeking ahead 5 bytes
+	reader.skip(4);
+	let someMagicByte = await reader.readUint8();
+	reader.skip(-5);
+
+	if(someMagicByte === 0x40) {
 		// XXX: Only seems to occur for the first block
 
-		pos += 10;
+		reader.skip(10);
 
-		let stringSize = data.readUInt16LE(pos); pos += 2;
+		let stringSize = await reader.readUint16();
 
-		pos += 6; // TODO: 0x06 is also right before the 0x40 we observed above
+		reader.skip(6); // TODO: 0x06 is also right before the 0x40 we observed above
 
-		pos += stringSize*2;
+		reader.skip(stringSize*2);
 
-		pos += 4; // Unknown 32bit number?
+		reader.skip(4); // Unknown 32bit number?
 	}
 	else {
-		pos += 8;
+		reader.skip(8);
 	}
 
 	// The length after the current position to the end of the filename
 	// This can be useful for skipping decoding of the filename
-	let firstPartSize = data.readUInt16LE(pos); pos += 2;
+	let firstPartSize = await reader.readUint16();
+	let afterFileName = reader.pos() + firstPartSize;
 
 	// Length of the filename in number of characters
-	let filenameSize = data.readUInt16LE(pos); pos += 2;
+	let filenameSize = await reader.readUint16();
 	
 	// Unknown 16bit field
-	pos += 2;
+	reader.skip(2);
 
 	// 128 for folders, otherwise this is 0 for regular files
-	let fileType = data[pos]; pos += 1;
+	let fileType = await reader.readUint8();
 
 	let isDirectory = fileType === FileType.Directory || fileType === FileType.Root;
 	let isFile = fileType === FileType.Regular;
@@ -127,50 +136,54 @@ export function ParseFileEntry(data: Buffer, pos: number): FileEntry {
 		console.warn('Unknown file type:', fileType);
 	}
 
-	pos += 3;
+	reader.skip(3);
 
 	// Decompressed size in bytes for regular files
-	let fileSize = data.readUIntLE(pos, 6); pos += 8; // Uint64
+	let fileSize = await reader.readUint64();
 	
-	pos += 8;
+	reader.skip(8);
 
-	let ctime = data.readUIntLE(pos, 6); pos += 8; // Uint64
-	let mtime = data.readUIntLE(pos, 6); pos += 8; // Uint64
+	let ctime = await reader.readUint64();
+	let mtime = await reader.readUint64();
 
 	// Usually this is 4 0xFF byte
-	pos += 4;
+	reader.skip(4);
 
 	// TODO: Currently this assumes that no rune ever takes up more than 2 bytes
-	let filename = data.slice(pos, pos + (2*filenameSize)).toString('utf16le');
-	pos += 2*filenameSize;
+	let filename = await reader.readStringU16(filenameSize);
 	
+	assert.equal(afterFileName, reader.pos())
+
 	// TODO: The number 27 bytes after the file name gets incremented with each dirent?
 
 	let numEntries = -1;
 	if(isDirectory) {
-		numEntries = data.readUInt32LE(pos + 45);
+
+		reader.skip(45);
+		numEntries = await reader.readUint32();
+		reader.skip(-1*(45 + 4)); // Back to start
 
 		if(fileType === FileType.Root) {
-			pos += 41;
+			reader.skip(41);
 		}
 		else {
-			pos += 85;
+			reader.skip(85);
 		}
 	}
 	else if(isFile) {
-		pos += 35;
+		reader.skip(35);
 	}
 
 
-	let handlesSize = data.readUInt32LE(pos); pos += 4;
+	let handlesSize = await reader.readUint32();
 	let handles: BoxHandle[] = [];
 	if(isFile) {
 		// TODO: Some directories should be able to have boxes too right? (for attributes)
-		handles = parseBoxHandles(data, pos, handlesSize);
+		handles = await readBoxHandles(reader, handlesSize);
 	}
-	
-	pos += handlesSize;
-
+	else {
+		reader.skip(handlesSize);
+	}
 
 	// TODO: Sometimes there is extra data after the references
 	// - sometimes there is none, other times there are 4 FF End-Of-Entry bytes, sometimes 
@@ -178,9 +191,12 @@ export function ParseFileEntry(data: Buffer, pos: number): FileEntry {
 	// Skip 4 FF bytes (end of entry indicator)
 	// NOTE: These are sometimes not included
 	// TODO: Verify that we got the right bytes
-	pos += 4;
+	await reader.skip(4);
 
-	let end = isFile? extent : pos;
+	let end = isFile? extent : reader.pos();
+
+	// Make sure we are at the very end of the current entry
+	reader.seek(end);
 
 	let baseEntry: AbstractFileEntry = {
 		start, end, extent,

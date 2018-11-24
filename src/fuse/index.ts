@@ -176,6 +176,7 @@ export class FuseHandler extends FuseReadOnlyHandler implements fuse.MountOption
 			
 			nlink,
 			
+			// TODO: I don't seem to be getting quite correct modified times
 			mtime: file.mtime,
 			atime: file.mtime,
 			ctime: file.ctime,

@@ -1,5 +1,6 @@
-import { ParseBox, Box } from './box';
-import fs from 'fs-extra';
+import { ReadBox, Box } from './box';
+import { Reader } from '../reader';
+import assert from 'assert';
 
 
 export interface Chunk {
@@ -12,22 +13,30 @@ export interface Chunk {
 
 
 // Parsing a decompressed chunk from the archive into file blocks
-export function ParseChunk(data: Buffer): Chunk {
+// NOTE: THis will read up to the inner start offset of the chunk 
+export async function ReadChunkHeader(reader: Reader): Promise<Chunk> {
+
+	let start = reader.pos();
 
 	// Chunk starts with it's own size
-	let chunkSize = data.readUInt32LE(0);
+	let chunkSize = await reader.readUint32();
 	
-	let end = 4 + chunkSize;
+	let inner_start = reader.pos();
 
+	let end = reader.pos() + chunkSize;
+
+	// TODO: Should be done only if we have the entire chunk decompressed
+	/*
 	// A record will only ever consist of a single chunk
-	if(end !== data.length) {
+	if(end !== reader.length()) {
 		throw new Error('Chunk does not take up full record')
 	}
+	*/
 
 	return {
-		start: 0,
-		end: end,
-		inner_start: 4,
+		start,
+		end,
+		inner_start,
 		inner_end: end // No data after the inner stuff, so it is the same as the normal end
 	};
 }
@@ -53,10 +62,9 @@ const RECORD_HEADER_SIZEOF = 4;
 const RECORD_TRAILER_SIZEOF = 4;
 
 
-async function ParseRecordHeader(file: number, pos: number): Promise<{ header_size: number; flags: number }> {
+async function ReadRecordHeader(reader: Reader): Promise<{ header_size: number; flags: number }> {
 
-	let header = Buffer.allocUnsafe(4);
-	await fs.read(file, header, 0, 4, pos); pos += 4;
+	let header = Buffer.from(await reader.readBytes(RECORD_HEADER_SIZEOF));
 
 	let flags = header[0];
 	if(flags !== 0x98 && flags !== 0x68) {
@@ -68,9 +76,8 @@ async function ParseRecordHeader(file: number, pos: number): Promise<{ header_si
 	return { header_size, flags };
 }
 
-async function ParseRecordTrailer(file: number, pos: number): Promise<{ trailer_size: number }> {
-	let trailer = Buffer.allocUnsafe(4);
-	await fs.read(file, trailer, 0, 4, pos);
+async function ReadRecordTrailer(reader: Reader): Promise<{ trailer_size: number }> {
+	let trailer = Buffer.from(await reader.readBytes(RECORD_TRAILER_SIZEOF));
 
 	if(trailer[0] !== 0x78) {
 		console.warn('Unknown trailer flags');
@@ -83,17 +90,21 @@ async function ParseRecordTrailer(file: number, pos: number): Promise<{ trailer_
 
 
 // TODO: Need to eventually have good support for detecting going over the end of the file for the purposes of recovering from incomplete archives
-export async function ParseRecord(file: number, blockSize: number, pos: number): Promise<Record> {
+export async function ReadRecord(reader: Reader, blockSize: number): Promise<Record> {
 
-	let start = pos;
-	let inner_start = start + RECORD_HEADER_SIZEOF;
+	let start = reader.pos();
 
-	let { header_size, flags } = await ParseRecordHeader(file, start);
+	let { header_size, flags } = await ReadRecordHeader(reader);
 	
+	let inner_start = reader.pos();
+
 	let end = inner_start + header_size;
 	let inner_end = end - RECORD_TRAILER_SIZEOF;
 
-	let { trailer_size } = await ParseRecordTrailer(file, inner_end);
+	reader.seek(inner_end);
+
+	// TODO: For efficiency, we may not want to read the trailer immediately until we read the data in the record
+	let { trailer_size } = await ReadRecordTrailer(reader);
 	
 	if(header_size !== trailer_size) {
 		throw new Error('Invalid header/trailer')
@@ -115,21 +126,26 @@ export async function ParseRecord(file: number, blockSize: number, pos: number):
  * 
  * This is basically an opposite version of the above ParseRecord function
  */
-export async function ParseReverseRecord(file: number, blockSize: number, pos: number) {
+export async function ReverseReadRecord(reader: Reader, blockSize: number) {
 	
-	let end = pos;
+	let end = reader.pos();
 	let inner_end = end - RECORD_TRAILER_SIZEOF;
+
+	reader.seek(inner_end);
 
 	if(end % blockSize !== 0) {
 		console.warn('Record does not end at a block offset');
 	}
 
-	let { trailer_size } = await ParseRecordTrailer(file, inner_end);
+	let { trailer_size } = await ReadRecordTrailer(reader);
 
 	let start = inner_end - trailer_size;
-	let inner_start = start + RECORD_HEADER_SIZEOF;
 		
-	let { header_size, flags } = await ParseRecordHeader(file, start);
+	reader.seek(start);
+
+	let { header_size, flags } = await ReadRecordHeader(reader);
+
+	let inner_start = reader.pos();
 
 	if(header_size !== trailer_size) {
 		throw new Error('Invalid header/trailer')
@@ -145,19 +161,16 @@ export async function ParseReverseRecord(file: number, blockSize: number, pos: n
 
 
 // Gets all boxes from inside a chunk
-export function ParseAllBoxes(chunkData: Buffer, chunk: Chunk): Box[] {
+export async function ReadAllBoxes(reader: Reader, chunk: Chunk): Promise<Box[]> {
 	let out = [];
 
-	let pos = chunk.inner_start;
-	while(pos < chunk.inner_end) {
-		let box = ParseBox(chunkData, pos);
+	reader.seek(chunk.inner_start);
+	while(reader.pos() < chunk.inner_end) {
+		let box = await ReadBox(reader);
 		out.push(box);
-		pos = box.end;
 	}
 
-	if(pos !== chunk.inner_end) {
-		throw new Error('Over/underrun of chunk');
-	}
+	assert.strictEqual(reader.pos(), chunk.inner_end, 'Over/underrun of chunk');
 
 	return out;
 }

@@ -4,6 +4,7 @@ import Slice from './slice';
 import { ParseMacVolumeMetaFile } from './mac/meta';
 import MacVolume from './mac/volume';
 import path from 'path';
+import { FileReader } from './reader';
 
 /**
  * 
@@ -39,8 +40,11 @@ export default class Archive {
 				throw new Error('Missing metafile');
 			}
 
-			let fd = await fs.open(metaFileName, 'r'); // TODO: Close this on failures (and after we are done parsing it entirely)
-			let meta = await ParseMacVolumeMetaFile(fd);
+			let reader = await FileReader.Create(metaFileName); // TODO: Close this on failures (and after we are done parsing it entirely)
+
+			let meta = await ParseMacVolumeMetaFile(reader);
+
+			await reader.close();
 
 			macVolume.metaFile = meta;
 

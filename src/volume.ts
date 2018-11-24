@@ -1,5 +1,5 @@
-import fs from 'fs-extra';
 import { ComputeAdler32 } from './utils';
+import { Reader, FileReader } from './reader';
 
 
 const VOLUME_MAGIC = 0xA2B924CE;
@@ -37,15 +37,15 @@ export default abstract class Volume {
 	 * Given a .tib file, this will open it and load basic information on it
 	 */
 	public static async Open(fileName: string) {
-		let fd = await fs.open(fileName, 'r');
+		let reader = await FileReader.Create(fileName);
 
 		let header: VolumeHeader;
 		try {
-			header = await this.LoadHeader(fd);
+			header = await this.LoadHeader(reader);
 		}
 		catch(e) {
 			// TODO: It is annoying that this is redundant with the volume's close() function 
-			await fs.close(fd);
+			await reader.close();
 
 			throw e;
 		}
@@ -56,16 +56,17 @@ export default abstract class Volume {
 		}
 
 		var vol = Gen();
-		vol.fd = fd;
+		vol.reader = reader;
 		vol.header = header;
 
 		return vol;
 	}
 
-	private static async LoadHeader(fd: number): Promise<VolumeHeader> {
+	private static async LoadHeader(reader: Reader): Promise<VolumeHeader> {
 
-		let headerBlock = Buffer.allocUnsafe(64); // < Just to be safe this is way more than the 36 bytes that the usual Mac header would take up
-		await fs.read(fd, headerBlock, 0, headerBlock.length, 0);
+		reader.seek(0);
+
+		let headerBlock = Buffer.from(await reader.readBytes(64));// < Just to be safe this is way more than the 36 bytes that the usual Mac header would take up
 	
 		let magic = headerBlock.readUInt32LE(0);
 		if(magic !== VOLUME_MAGIC) {
@@ -131,11 +132,11 @@ export default abstract class Volume {
 
 	protected constructor() {}
 
-	async close() {
-		await fs.close(this.fd);
+	close() {
+		return this.reader.close();
 	}
 
-	protected fd: number;
+	protected reader: Reader;
 
 
 
@@ -153,7 +154,7 @@ export default abstract class Volume {
 		}
 
 		if(this.header.version === VolumeVersion.Mac) {
-			if(this.header.length !== 0x24 || this.header.blockSize !== 4096) {
+			if(this.header.length !== 0x24 || this.header.blockSize !== 4096 || this.header.sequence !== 1) {
 				return false;
 			}
 

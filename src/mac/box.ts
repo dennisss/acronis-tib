@@ -1,5 +1,6 @@
-import { ParseFileEntry, FileEntry } from './file_entry';
+import { FileEntry, ReadFileEntry } from './file_entry';
 import assert from 'assert';
+import { Reader } from '../reader';
 
 
 // TODO: Start validating this again for all of the boxes instead of records
@@ -83,6 +84,10 @@ export interface AttributesBox extends OpaqueBox {
 
 export interface MetaDataBox extends OpaqueBox {
 	type: BoxType.MetaData;
+
+	sliceId: Buffer; /**< 16byte UUID identifying the slice */
+	sliceCreationTime: Date;
+
 	xml: string;
 	files: FileEntry[]; // TODO: Eventually we will require that these be parsed separately after reading the initial outer box
 }
@@ -96,11 +101,11 @@ export type Box = UnknownBox | ContainerBox | BlobBox | StatTimeBox | StatUserBo
 
 
 
-export function ParseBox(data: Buffer, pos: number): Box {
+export async function ReadBox(reader: Reader): Promise<Box> {
 
-	let start = pos;
+	let start = reader.pos();
 
-	let magic = data[pos]; pos += 1;
+	let magic = await reader.readUint8();
 	
 	/*
 	if(magic !== BOX_MAGIC) { // XXX: Magic will be different depending on the file type
@@ -108,13 +113,13 @@ export function ParseBox(data: Buffer, pos: number): Box {
 	}
 	*/
 
-	let size = data.readUIntLE(pos, 3); pos += 3; // Uint24
+	let size = await reader.readUint24();
 	
 	// Zero-length boxes do seem to actually exist
 	if(size === 0) {
 		return {
 			start,
-			end: pos,
+			end: reader.pos(),
 			type: BoxType.Empty
 		};	
 	}
@@ -125,7 +130,7 @@ export function ParseBox(data: Buffer, pos: number): Box {
 
 
 	// TODO: Actually there is a 1 byte 0xC0 and then 4 bytes of actual type information (so the type is a uint32)
-	let rawType = data.readUInt16LE(pos); pos += 2; size -= 2;
+	let rawType = await reader.readUint16(); size -= 2;
 
 	let type = rawType;
 
@@ -136,16 +141,21 @@ export function ParseBox(data: Buffer, pos: number): Box {
 	}
 	*/
 
-	let bodyStart = pos;
+	let bodyStart = reader.pos();
 	let bodySize = size;
 	let bodyEnd = bodyStart + bodySize;
+
+	// TODO: This can't be efficiently done in the case we were given a CompressedReader which doesn't know the length
+	/*
 	pos += bodySize;
 	if(data.length < bodyEnd) {
 		// This will happen if the buffer given doesn't have enough bytes to satisfy the full box
 		throw new Error('Underrunning box');
 	}
+	*/
 
-	let end = pos;
+	// No bytes after the body
+	let end = bodyEnd;
 
 
 	let box: Box;
@@ -159,17 +169,19 @@ export function ParseBox(data: Buffer, pos: number): Box {
 		};
 	}
 	else if(type === BoxType.Blob) {
+		reader.skip(3);
+
 		box = {
 			start, end,
 			type: BoxType.Blob,
-			data: data.slice(bodyStart + 3)
+			data: Buffer.from(await reader.readBytes(bodyEnd - reader.pos()))
 		};
 	}
 	else if(type === BoxType.StatTime) {
+		reader.skip(3);
 		assert(bodySize === 19)
-
-		// TODO: Not working?
-		let mtime = data.readUIntLE(bodyStart + 3, 6); // NOTE: Takes up all 8 bytes?
+		
+		let mtime = await reader.readUint64();
 
 		box = {
 			start, end,
@@ -180,8 +192,9 @@ export function ParseBox(data: Buffer, pos: number): Box {
 	else if(type === BoxType.StatUser) {
 		assert.equal(bodySize, 23);
 
-		let user_id = data.readUInt32LE(bodyStart + 11);
-		let group_id = data.readUInt32LE(bodyStart + 11 + 4);
+		reader.skip(11);
+		let user_id = await reader.readUint32();
+		let group_id = await reader.readUint32();
 
 		box = {
 			start, end,
@@ -191,54 +204,53 @@ export function ParseBox(data: Buffer, pos: number): Box {
 		};
 	}
 	else if(type === BoxType.Attributes) {
-		let bodyPos = bodyStart + 3;
+		reader.skip(3);
 
 		let list: Attrib[] = [];
 
-		while(bodyPos < bodyEnd) {
+		while(reader.pos() < bodyEnd) {
 
-			let keySize = data.readUInt16LE(bodyPos); bodyPos += 2;
-			let valSize = data.readUIntLE(bodyPos, 6); bodyPos += 8;
+			let keySize = await reader.readUint16();
+			let valSize = await reader.readUint64();
 
 			// TODO: For small buffers like this, we want to copy them out so that we can garbage collect the outer chunk memory
-			let key = data.slice(bodyPos, bodyPos + keySize); bodyPos += keySize;
-			let val = data.slice(bodyPos, bodyPos + valSize); bodyPos += valSize;
-
-			assert.strictEqual(key.length, keySize);
-			assert.strictEqual(val.length, valSize);
+			let key = Buffer.from(await reader.readBytes(keySize));
+			let val = Buffer.from(await reader.readBytes(valSize));
 
 			list.push({
 				key, value: val
 			});
 		}
 
+		assert.strictEqual(reader.pos(), bodyEnd, 'Not all attribute data consumed'); 
+
 		box = {
 			start, end,
 			type: BoxType.Attributes,
 			list: list
 		};
-
-		assert.strictEqual(bodyPos, bodyEnd, 'Not all attribute data consumed'); 
 	}
 	else if(type === BoxType.MetaData) {
 
 		// TODO: We should use absolute file positions for this as body offsets are really annoying to deal with
 
-		let inner_size = data.readUIntLE(bodyStart + 0, 3); // Uint24
+		let inner_size = await reader.readUint24();
 
-		let inner_start = bodyStart + 3;
+		let inner_start = reader.pos();
 		let inner_end = inner_start + inner_size;
 		// TODO: There is still a lot of info after this as well
 
-		// TODO: Export this stuff somewhere
-		let uuidPosition = inner_start + 53;
-		let slice_id = data.slice(uuidPosition, uuidPosition + 16);
+		/*
+			Into the chunk file, at offset 38 is another uint32 representing the size 
 
-		console.log('SLICE ID', slice_id);
+			uint16 located at 64 byte offset -> represents a small chunk immediately after it
+		*/
 
-		let datePosition = uuidPosition + 16;
-		let sliceCreationTime = data.readUIntLE(datePosition, 6); // 64bit
-		// TODO: Convert to date
+
+		reader.skip(53);
+
+		let sliceId = Buffer.from(await reader.readBytes(16));
+		let sliceCreationTime = new Date(await reader.readUint64());
 
 
 		// This says '<?xml' in unicode
@@ -246,17 +258,25 @@ export function ParseBox(data: Buffer, pos: number): Box {
 
 		// We currently don't know how to parse everything before the xml string, so we will just try to find the xml string and then go from there
 		let foundXml = false;
-		let bodyPos = inner_start + 100;
-		while(bodyPos < inner_end) {
-			if(data.slice(bodyPos, bodyPos + xmlMagic.length).equals(xmlMagic)) {
+
+		let searchPos = inner_start + 100;
+		while(reader.pos() <= inner_end - xmlMagic.length) {
+
+			reader.seek(searchPos);
+
+			let testBuf = Buffer.from(await reader.readBytes(xmlMagic.length));
+
+			if(testBuf.equals(xmlMagic)) {
 				foundXml = true;
 
 				// Go back 2 spaces (because we do know that the length of the xml is immediately before it)
-				bodyPos -= 2;
+				reader.seek(searchPos - 2);
+
 				break;
 			}
 
-			bodyPos++;
+			// Next time search 1 byte forward
+			searchPos++;
 		}
 
 		// NOTE: For a normal backup of just plain files, 'bodyPos == inner_start + 155' right here
@@ -265,19 +285,19 @@ export function ParseBox(data: Buffer, pos: number): Box {
 			throw new Error('Could not find the configuration xml');
 		}
 
-		let xmlSize = data.readUInt16LE(bodyPos); bodyPos += 2; // Size of xml in bytes
+		let xmlSize = await reader.readUint16(); // Size of xml in bytes
 
-		let xml = data.slice(bodyPos, bodyPos + xmlSize).toString('utf16le');
-		bodyPos += xmlSize;
-
-
+		let xml = Buffer.from(await reader.readBytes(xmlSize)).toString('utf16le');
 
 		// I don't know why this is, but there is clearly a vector of some kind immediately after the 
-		if(data[bodyPos] !== 0) {
-			bodyPos += 52;
+		let someMagicByte = await reader.readUint8();
+		reader.skip(-1);
+
+		if(someMagicByte !== 0) {
+			reader.skip(52);
 		}
 		else {
-			bodyPos += 8;
+			reader.skip(8);
 		}
 
 
@@ -285,16 +305,17 @@ export function ParseBox(data: Buffer, pos: number): Box {
 
 		let files: FileEntry[] = []
 
-		while(bodyPos < inner_end - 3) {
+		while(reader.pos() < inner_end - 3) {
 			// TODO: Instead these should be called directory entries (or fs entries?)
-			let file = ParseFileEntry(data, bodyPos);
+			let file = await ReadFileEntry(reader);
 			files.push(file);
-			bodyPos = file.end;
 		}
 		
 		box = {
 			start, end,
 			type: BoxType.MetaData,
+			sliceId,
+			sliceCreationTime,
 			xml: xml,
 			files: files
 		};
@@ -306,6 +327,10 @@ export function ParseBox(data: Buffer, pos: number): Box {
 			byte: rawType
 		};
 	}
+
+
+	// In case we didn't parse everything, go to the end of the box
+	reader.seek(bodyEnd);
 
 	return box;
 }

@@ -1,62 +1,14 @@
 import Volume, { VolumeVersion } from "../volume";
-import fs from 'fs-extra';
-import path from 'path';
-import { ReadCompressedStream } from '../compression';
-import assert from 'assert';
-
-/*
-	TODO: For every single file/directory entry, we also see a set of 102, 1, 2, 5 records which we don't know the meaning of yet
-*/
-
-// This seems to always be the first 8 bytes of RecordIndexes
-const RECORD_INDEX_MAGIC = Buffer.from('0102001001000000', 'hex');
+import { ReadRecord, RecordType } from './record';
 
 
-enum RecordType {
-	Config = 101, /**< Contains xml configuration data key-value pairs */
-	FirstFileMetaRecord = 102, /**< I don't know what this record contains but it is referenced by a single FileEntry and is followed by the rest fo the relevant  */
-	FileMetaA = 1, /**< Typically will follow the FirstFileMetaRecord */
-	FileMetaB = 2, /**< Typically will follow the FileMetaA */
-	FileMetaC = 5, /**< Typically will follow the FileMetaB */
-	Listing = 103, /**< Contains a list of all files/directories in the archive */
-	EndTrailer = 104, /**< Indicates the start of the end index that is referenced by the footer and holds a summary of where the important metadata blocks are located in the list (this means nothing else meaninful is left in the file. Generally we don't need to parse this if we are going forward as this should have been referenced already if we had loaded the footer of the file) */
-	RecordIndex = 108, /**< For regular files, this contains the index of where each record holding data for it is located */
-	Blob = 109, /**< Contains file data */
-	BlobSuffix = 110, /**< This is inserted after every single blob for a file has been written (usaully empty but may contain metadata?) */
-}
-
-interface ConfigAttribute {
-	key: string;
-	value: string;
-}
-
-interface FileEntry {
-	path: string;
-	name: string;
-	shortName: string;
-
-	time: Date;
-
-	fileSize: number; // NOTE: If there are zeros at the end of the file, then i think that it will clip them and assume that everything overflowing the available data is zeros
-	fileSize2: number;
-
-	metaOffset: number; /**< Offset relative to after the header of the RecordType.FirstFileMetaRecord for this entry. Reading sequential  */
-
-}
-
-
-interface RecordHandle {
-	startOffset: number; /**< Offset relative to the start of the uncompressed file at which this record stores data (should be used along with the end offset for fast seeking) */
-
-	recordOffset: number; /**< Offset in the archive relative to the end of the header at which this record starts */
-
-	hash: Buffer; /**< 16byte MD5 hash of the decompressed block */
-}
 
 interface VolumeFooter {
 	isValid: boolean;
 	metaDataOffset: number; /**< This will be the offset of the RecordType.Config block relative to end of the file header */
 }
+
+
 
 
 export class Windows2015Volume extends Volume {
@@ -67,21 +19,27 @@ export class Windows2015Volume extends Volume {
 
 	footer: VolumeFooter;
 
+	// TODO: This is still largely a work in progress
 	/**
 	 * Volumes will be a footer that can be used to verify that the volume is completely written and allows for seeking directly to the metadata without needing to read the entire file
 	 */
 	async loadFooter() {
-		let stat = await fs.fstat(this.fd);
-		if(stat.size < 90) {
+		let reader = this.reader.slice();
+
+		let size = await reader.length();
+		if(size < 90) {
 			// Shouldn't be possible for this to be meaninfully possible
 		}
 
-		if(stat.size % this.header.blockSize !== 0) {
+		if(size % this.header.blockSize !== 0) {
 			// Most likely an invalid file (did not finish being written)
 		}
 
-		let buf = Buffer.allocUnsafe(48);
-		await fs.read(this.fd, buf, 0, 48, stat.size - 48);
+
+
+		reader.seek(size - 48);
+
+		let buf = Buffer.from(await reader.readBytes(48));
 
 		let isValid = true;
 
@@ -94,11 +52,69 @@ export class Windows2015Volume extends Volume {
 		}
 
 		let isValidOffset = (v: number) => {
-			return v >= this.header.length && v < (stat.size - this.header.length);
+			return v >= this.header.length && v < (size - this.header.length);
 		}
 
-		// NOTE: This is a 64bit number
+		// NOTE: This is a 64bit number (possibly shorter, maybe safer to only read up-to the first zero)
 		let off = buf.readUIntLE(buf.length - this.header.length - 8, 6);
+
+		// This is the absolute position of the very-very end of the file's meaningful data
+		let endOfFile = off + this.header.length;
+		
+		
+		reader.seek(endOfFile - 4);
+
+		let lastFour = Buffer.from(await reader.readBytes(4));
+
+		// Usually this case is for file/directory-based backups
+		if(lastFour.equals(Buffer.from('2C8AE194', 'hex'))) {
+
+			reader.seek(endOfFile - 12);
+
+			let metaOffset = await reader.readUint64();
+
+
+		}
+		// For sector-by-sector backups
+		else if(lastFour.equals(Buffer.from('2B8AE194', 'hex'))) {
+
+			// TODO: Refigure this out
+
+			reader.seek(endOfFile - 8);
+
+			let trailerSize = await reader.readUint32();
+
+
+			let startOfTrailer = endOfFile - 8 - trailerSize;
+
+			reader.seek(startOfTrailer);
+
+			let trailer = Buffer.from(await reader.readBytes(trailerSize));
+
+			let pos = 0;
+
+			// First two bytes of the trailer are always zero
+			pos += 2;
+			
+			// Offset of the metadata entry
+			let metaDataOffLen = trailer[pos]; pos += 1;
+			let metaDataOff = trailer.readUIntLE(pos, metaDataOffLen); pos += metaDataOffLen;
+
+			pos += 7;
+
+			// This is the total fully uncompressed size of the main partition?
+			let fullSizeLen = trailer[pos]; pos += 1;
+			let fullSize = trailer.readUIntLE(pos, fullSizeLen); pos += fullSizeLen;
+
+			pos += 2;
+
+			let metaDataOff2Len = trailer[pos]; pos += 1;
+			let metaDataOff2 = trailer.readUIntLE(pos, metaDataOffLen); pos += metaDataOffLen;
+
+
+		}
+
+
 
 		// For whatever reason, the value we actually want is 20 bytes after the previous value
 		off += 20;
@@ -106,9 +122,13 @@ export class Windows2015Volume extends Volume {
 		let metaDataOffset = -1;
 
 		// Check the offset is in the file
-		if(isValidOffset(8) && ((off + 8) < stat.size - this.header.length)) {
-			await fs.read(this.fd, buf, 0, 8, off);
-			metaDataOffset = buf.readUIntLE(0, 6); // Also a 64bit number
+		// TODO: This is definately wrong
+		if(isValidOffset(8) && ((off + 8) < size - this.header.length)) {
+
+			reader.seek(off);
+
+			let metaDataOffset = await reader.readUint64();
+
 			if(!isValidOffset(metaDataOffset)) {
 				isValid = false;
 			}
@@ -121,196 +141,28 @@ export class Windows2015Volume extends Volume {
 			isValid,
 			metaDataOffset
 		};
+
+		await reader.close();
 	}
 	
 
-	async read(outputFolder: string) {
+	async readAll(outputFolder: string) {
 
-		let stat = await fs.fstat(this.fd);
+		let reader = this.reader.slice();
 
-		// First at 0x1e9d
-		// Next at 0x208c
+		let size = await reader.length();
+
+		reader.seek(32);
+
+		// TODO: We will need to extract this for the sake of being able to do random access
 	
-		let pos = 32; // 7836; //32 // 32; //7675; //32; //2309965;  //32;
-	
-		let buf = Buffer.allocUnsafe(128);
-	
-	
-		while(pos < stat.size) {
-			console.log('');
+		while(reader.pos() < size) {
 
-			let startPos = pos;
+			let rec = await ReadRecord(reader);
 
-			console.log('POS', pos);
-			
-			fs.readSync(this.fd, buf, 0, 1, pos); pos += 1;
-	
-			let type = buf[0];
-			console.log('TYPE', type);
-		
-
-			let data: Buffer;
-
-			if(type === RecordType.EndTrailer) {
+			if(rec.type === RecordType.EndTrailer) {
 				break;
 			}
-			// Zlib stream encoded
-			if(type === RecordType.Blob || type === RecordType.BlobSuffix || type === RecordType.RecordIndex) {
-				let res = await ReadCompressedStream(this.fd, pos, -1);
-				data = res.data;
-				pos += res.length;
-			}
-			// Raw deflate encoded
-			else if(type === RecordType.Config || type === 102 || type === 103 || type === 1 || type === 2 || type === 5) {
-				let res = await ReadCompressedStream(this.fd, pos, -1, true);
-				data = res.data;
-				pos += res.length;
-
-				/*
-				let targetSum = ComputeAdler32(buf);
-	
-				fs.readSync(file, buf, 0, 4, pos);
-				let checkSum = buf.readUInt32LE(0);
-	
-				console.log(targetSum, checkSum);
-				*/
-	
-				// 4 byte checksum of something?
-				pos += 4;
-			}
-			else {
-				// NOTE: We currently don't know of any record types that aren't compressed 
-				throw new Error('Unknown item type');
-			}
-
-
-			await fs.writeFile(path.join(outputFolder, startPos.toString().padStart(8, '0') + '-' + type.toString()), data);
-
-
-			let dataPos = 0;
-	
-			function readU16(len: number) {
-				let str = data.slice(dataPos, dataPos + (len*2)).toString('utf16le');
-				dataPos += len*2;
-				return str;	
-			}
-
-			if(type === RecordType.Config) {
-
-				// XXX: No idea yet what the first 169 bytes do
-				dataPos = 165;
-
-				// TODO: Double check that we read exactly this many
-				let numAttribs = data.readUInt32LE(dataPos); dataPos += 4;
-
-				let n = 0;
-
-				// NOTE: Usually there seems to be one extra byte at the end all the time
-				while(dataPos < data.length - 1) {
-					let keyLength = data.readUInt32LE(dataPos); dataPos += 4;
-					let key = readU16(keyLength);
-
-					let valLength = data.readUInt32LE(dataPos); dataPos += 4;
-					let val = readU16(valLength);// NOTE: the first 2 bytes of this buffer are usually the 0xfffe byte order marker
-
-
-					let attr : ConfigAttribute = {
-						key: key,
-						value: val
-					}
-
-					console.log(++n);
-					console.log(attr);
-				}
-
-			}
-			else if(type === RecordType.Listing) {
-
-				dataPos = 0;
-
-
-				let numEntries = data.readUInt32LE(dataPos); dataPos += 4;
-
-				while(dataPos < data.length) {
-
-					let pathLength = data.readUInt32LE(dataPos); dataPos += 4;
-					let path = readU16(pathLength);
-
-					// Some uint32
-					dataPos += 4;
-
-					let nameLength = data.readUInt32LE(dataPos); dataPos += 4;
-					let name = readU16(nameLength);
-
-					let shortNameLength = data.readUInt32LE(dataPos); dataPos += 4;
-					let shortName = readU16(shortNameLength);
-
-					let timeRaw = data.readUIntLE(dataPos, 6); dataPos += 8;
-					let time = new Date(timeRaw);
-
-					dataPos += 4;
-
-
-					// TODO: What is the difference between these?
-					let fileSize = data.readUIntLE(dataPos, 6); dataPos += 8;
-					let fileSize2 = data.readUIntLE(dataPos, 6); dataPos += 8;
-
-					let metaOffset = data.readUIntLE(dataPos, 6); dataPos += 8;
-
-
-					dataPos += 38;
-
-
-					let entry: FileEntry = {
-						path,
-						name,
-						shortName,
-						time,
-						fileSize,
-						fileSize2,
-						metaOffset
-					};
-
-					console.log(entry);
-				}
-
-
-
-
-			}
-			else if(type === RecordType.RecordIndex) {
-
-				dataPos = 0;
-
-				assert(RECORD_INDEX_MAGIC.equals(data.slice(0, 8)), 'Bad record index magic');
-				dataPos += 8;
-
-				// Uncompressed of all data records in this index (should be the same as the file size)
-				let totalSize = data.readUIntLE(dataPos, 6); dataPos += 8;
-
-				let numHandles = data.readUInt32LE(dataPos); dataPos += 4;
-
-				for(var i = 0; i < numHandles; i++) {
-
-					let startOffset = data.readUIntLE(dataPos, 6); dataPos += 8;
-					let recordOffset = data.readUIntLE(dataPos, 6); dataPos += 8;
-					let hash = data.slice(dataPos, dataPos + 16); dataPos += 16;				
-
-					let handle: RecordHandle = {
-						startOffset,
-						recordOffset,
-						hash
-					};
-				}
-
-
-				// TODO: There are usually 204 bytes after the handles which still don't have any known meaning
-				// ^ Last 24 bytes of these are always the exact same as the first 24 bytes of the index
-				// The rest of the bytes before these seem to always be constant across indexes in the same archive at the least
-
-				//console.log('END POS', dataPos, data.length);
-			}
-
 		}
 
 		/*
@@ -319,6 +171,7 @@ export class Windows2015Volume extends Volume {
 		*/
 		
 
+		await reader.close();
 	}
 
 }

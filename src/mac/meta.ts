@@ -1,42 +1,48 @@
-import fs from 'fs-extra';
 import { ReadCompressedStream } from '../compression';
-import { ParseRecord, ParseChunk, ParseAllBoxes } from './record';
+import { ReadRecord, ReadChunkHeader, ReadAllBoxes } from './record';
 import { Box } from './box';
+import { Reader, DataViewReader, ReaderEndian } from '../reader';
+import { CheckAllZeros } from '../utils';
 
 
 export interface MacVolumeMetaFile {
 	boxes: Box[];
 }
 
+export async function ParseMacVolumeMetaFile(reader: Reader): Promise<MacVolumeMetaFile> {
 
-export async function ParseMacVolumeMetaFile(file: number): Promise<MacVolumeMetaFile> {
-	let stat = await fs.fstat(file);
+	reader.seek(0);
+	let size = await reader.length();
 
 	let allBoxes: Box[] = [];
 
 	let blockSize = 128;
 
-	let pos = 0;
-	while(pos < stat.size) {
-		let metaHeader = Buffer.allocUnsafe(16);
-		await fs.read(file, metaHeader, 0, metaHeader.length, pos); // TODO: Must start checking the return value of commands like this
-		pos += metaHeader.length;
+	while(reader.pos() < size) {
+		let metaHeader = Buffer.from(await reader.readBytes(16));
 
 		if(metaHeader[0] !== 0x77 || metaHeader[1] !== 0x14) {
 			console.warn('Strange looking meta header:', metaHeader);
 		}
 
 
-		let record = await ParseRecord(file, blockSize, pos);
+		let record = await ReadRecord(reader, blockSize);
+		reader.seek(record.inner_start);
 
 		if(record.flags === 0x88) {
-			let { data: chunkData } = await ReadCompressedStream(
-				file, record.inner_start, record.inner_end
+			let chunkData = await ReadCompressedStream(
+				reader, record.inner_end - record.inner_start
 			);
 
-			let chunk = ParseChunk(chunkData);
+			if(!(await CheckAllZeros(reader, record.inner_end - reader.pos()))) {
+				console.warn('Detected unknown data in padding after compressed stream');
+			}
 
-			let boxes = ParseAllBoxes(chunkData, chunk);
+			let chunkReader = new DataViewReader(chunkData, ReaderEndian.LittleEndian);
+
+			let chunk = await ReadChunkHeader(chunkReader);
+			
+			let boxes = await ReadAllBoxes(chunkReader, chunk);
 
 			allBoxes.push.apply(allBoxes, boxes);
 		}
@@ -47,10 +53,10 @@ export async function ParseMacVolumeMetaFile(file: number): Promise<MacVolumeMet
 			console.warn('(META) Unknown record flags:', record.flags);
 		}
 
-		pos = record.end;
+		reader.seek(record.end);
 	}
 
-	if(pos !== stat.size) {
+	if(reader.pos() !== size) {
 		throw new Error('Did not correctly consume entire metafile');
 	}
 
