@@ -16,7 +16,7 @@ export interface AbstractFileEntry {
 
 	name: string;
 	size: number;
-	ctime: Date;
+	atime: Date;
 	mtime: Date;
 
 	handles: BoxHandle[];
@@ -143,8 +143,8 @@ export async function ReadFileEntry(reader: Reader): Promise<FileEntry> {
 	
 	reader.skip(8);
 
-	let ctime = await reader.readUint64();
 	let mtime = await reader.readUint64();
+	let atime = await reader.readUint64();
 
 	// Usually this is 4 0xFF byte
 	reader.skip(4);
@@ -202,7 +202,7 @@ export async function ReadFileEntry(reader: Reader): Promise<FileEntry> {
 		start, end, extent,
 		name: filename,
 		size: fileSize,
-		ctime: new Date(ctime),
+		atime: new Date(atime),
 		mtime: new Date(mtime),
 		handles
 	};

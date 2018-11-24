@@ -91,6 +91,8 @@ export default class MacVolume extends Volume {
 		
 			let record = await ReadRecord(reader, this.header.blockSize);
 	
+			reader.seek(record.inner_start);
+
 			let chunkData = await ReadCompressedStream(
 				reader, record.inner_end - record.inner_start,
 			);

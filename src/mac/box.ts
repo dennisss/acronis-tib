@@ -63,7 +63,7 @@ export interface BlobBox extends OpaqueBox {
 
 export interface StatTimeBox extends OpaqueBox {
 	type: BoxType.StatTime;
-	mtime: Date;
+	ctime: Date;
 }
 
 export interface StatUserBox extends OpaqueBox {
@@ -181,12 +181,15 @@ export async function ReadBox(reader: Reader): Promise<Box> {
 		reader.skip(3);
 		assert(bodySize === 19)
 		
-		let mtime = await reader.readUint64();
+		let ctime = await reader.readUint64();
+
+		// This is pretty much always 0, IDK what it means
+		await reader.readUint64();
 
 		box = {
 			start, end,
 			type: BoxType.StatTime,
-			mtime: new Date(mtime)
+			ctime: new Date(ctime)
 		};
 	}
 	else if(type === BoxType.StatUser) {
