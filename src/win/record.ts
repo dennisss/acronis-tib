@@ -99,6 +99,24 @@ export interface BlobRecord extends OpaqueRecord {
 export type Record = ConfigRecord | IndexRecord | EndTrailerRecord | ListingRecord | BlobRecord | UnparsedRecord;
 
 
+/**
+ * Read all records in a stream until we hit the end of that stream or we hit the end marker
+ */
+export async function ReadAllRecords(reader: Reader): Promise<Record[]> {
+	let recs: Record[] = []
+	let size = await reader.length();
+
+	while(reader.pos() < size) {
+		let rec = await ReadRecord(reader);
+		recs.push(rec);
+		if(rec.type === RecordType.EndTrailer) {
+			break;
+		}
+	}
+
+	return recs;
+}
+
 export async function ReadRecord(reader: Reader): Promise<Record> {
 
 	let start = reader.pos();

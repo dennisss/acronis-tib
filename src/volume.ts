@@ -28,8 +28,8 @@ export interface VolumeHeader {
 }
 
 
-type VolumneGenerator = () => Volume;
-const VolumeImpls: { [v: number]: VolumneGenerator } = {};
+type VolumeGenerator = (fileName: string, reader: Reader, header: VolumeHeader) => Promise<Volume>;
+const VolumeImpls: { [v: number]: VolumeGenerator } = {};
 
 
 export default abstract class Volume {
@@ -52,12 +52,14 @@ export default abstract class Volume {
 
 		let Gen = VolumeImpls[header.version];
 		if(!Gen) {
-			throw new Error('New implementation for volume type: ' + header.version);
+			throw new Error('No implementation for volume type: ' + header.version);
 		}
 
-		var vol = Gen();
-		vol.reader = reader;
-		vol.header = header;
+		var vol = await Gen(fileName, reader, header);
+
+		if(!vol.validateHeader()) {
+			console.warn('Volume contains suspicious header')
+		}
 
 		return vol;
 	}
@@ -117,9 +119,11 @@ export default abstract class Volume {
 	}
 
 	/**
+	 * Registers a new implementation of a volume format
+	 * 
 	 * NOTE: Don't use this externally. This is mainly for internal usage
 	 */
-	public static _AddType(v: VolumeVersion, fn: VolumneGenerator) {
+	public static AddType(v: VolumeVersion, fn: VolumeGenerator) {
 		if(VolumeImpls[v]) {
 			throw new Error('Duplicate implementation of volume type: ' + v);
 		}
@@ -127,16 +131,20 @@ export default abstract class Volume {
 		VolumeImpls[v] = fn;
 	}
 
-
+	public fileName: string;
 	public header: VolumeHeader;
+	public reader: Reader;
 
-	protected constructor() {}
+	protected constructor(fileName: string, reader: Reader, header: VolumeHeader) {
+		this.fileName = fileName;
+		this.reader = reader;
+		this.header = header;
+	}
 
 	close() {
 		return this.reader.close();
 	}
 
-	protected reader: Reader;
 
 
 

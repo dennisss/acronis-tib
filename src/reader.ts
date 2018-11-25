@@ -1,5 +1,6 @@
 import fs from 'fs-extra';
 import { ToArrayBuffer } from './utils';
+import search from './search';
 
 
 export enum ReaderEndian {
@@ -138,7 +139,7 @@ export class FileReader extends BufferBasedReader {
 	}
 
 	seek(pos: number) {
-		this._pos = pos;
+		this._pos = pos + this._start;
 	}
 
 	slice(start?: number, end?: number) {
@@ -257,9 +258,136 @@ export class DataViewReader extends Reader {
 		let buf = Buffer.from(await this.readBytes(8));
 		return buf.readUIntLE(0, 6);
 		
+		// TODO
 		// NOTE: We assume that we are never dealing with values with more than 48bits of integer precision
 		const val = this._view.getFloat64(this._pos, this._littleEndian); this._pos += 8;
 		return val;
 	}
 
 }
+
+/**
+ * A reader which is the concatenated version of many subreaders
+ *
+ * NOTE: We currently don't support gaps in the readers (although this would eventually be useful to account for missing data), although that could also be implemented elsewhere with a reader that returns all zeros, or errors out on reads
+ */
+export class ConcatenatedReader extends BufferBasedReader {
+
+	/**
+	 * Currently can only create one from several known length readers
+	 */
+	static async Create(readers: Reader[]) {
+
+		let c = new ConcatenatedReader();
+
+		let pos = 0;
+		c._offsets = [];
+		for(let r of readers) {
+			let len = await r.length();
+
+			c._offsets.push({
+				start: pos,
+				end: pos + len
+			});
+
+			pos += len;
+		}
+
+		c._readers = readers.map((r) => r.slice());
+
+		return c;
+	}
+
+
+	private _pos = 0;
+
+	private _readers: Reader[];
+	private _offsets: Array<{ start: number; end: number }>
+
+
+	private constructor() {
+		super();
+	}
+
+	/**
+	 * Creates a new reader for the given reader concatenated to the end of this one
+	 */
+	append(reader: Reader) {
+		return ConcatenatedReader.Create(this._readers.concat([reader]));
+	} 
+
+
+	// Nicely handled by the gargabe collector
+	close() {
+		return Promise.all(this._readers.map((r) => r.close())).then(() => {});
+	}
+
+	async length() {
+		return this._offsets[this._offsets.length - 1].end;
+	}
+
+	async readBufferBytes(count: number) {
+
+		// Searching for the starting index
+		let idx = search(this._offsets, this._pos, (item, v) => {
+			if(item.end <= v) {
+				return -1;
+			}
+
+			if(item.start > v) {
+				return 1;
+			}
+
+			return 0;
+		});
+
+		if(idx < 0) {
+			throw new Error('Start position not found in the reader');
+		}
+
+		let parts: Buffer[] = [];
+		while(count > 0 && idx < this._readers.length) {
+			let n = Math.min(this._offsets[idx].end, this._pos + count) - this._pos
+
+			this._readers[idx].seek(this._pos - this._offsets[idx].start);
+
+			parts.push(Buffer.from(
+				await this._readers[idx].readBytes(n)
+			));
+
+			count -= n;
+			this._pos += n;
+			idx++;
+		}
+
+		if(count !== 0) {
+			throw new Error('Not all bytes could be read')
+		}
+
+		return Buffer.concat(parts);
+
+	}
+
+	slice(start?: number, end?: number) {
+		if(start !== undefined || end !== undefined) {
+			throw new Error('Partial slices implemented on ConcatenatedReader');
+		}
+
+		let copy = new ConcatenatedReader();
+		copy._offsets = this._offsets;
+		copy._readers = this._readers.map((r) => r.slice());
+		return copy;
+	}
+
+
+	pos() {
+		return this._pos;
+	}
+
+	seek(n: number) {
+		this._pos = n;
+	}
+
+
+}
+

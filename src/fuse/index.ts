@@ -6,6 +6,7 @@ import MacVolume from '../mac/volume';
 import { MetaDataBox, BoxType, BlobBox } from '../mac/box';
 import { FileEntry, FileType } from '../mac/file_entry';
 import { FuseReadOnlyHandler } from './read_only';
+import { MacArchive } from '../mac/archive';
 
 
 export class FuseHandler extends FuseReadOnlyHandler implements fuse.MountOptions {
@@ -27,9 +28,11 @@ export class FuseHandler extends FuseReadOnlyHandler implements fuse.MountOption
 	constructor(public archive: Archive) {
 		super();
 
+		let arch = this.archive as MacArchive;
+
 		let vol = this.archive.volumes[0] as MacVolume;
 
-		let metaBox = vol.metaFile.boxes.find((box) => {
+		let metaBox = arch.metaFile.boxes.find((box) => {
 			return box.type === BoxType.MetaData;
 		}) as MetaDataBox|undefined;
 
@@ -176,11 +179,10 @@ export class FuseHandler extends FuseReadOnlyHandler implements fuse.MountOption
 			
 			nlink,
 			
-			// TODO: I don't seem to be getting quite correct modified times
 			mtime: file.mtime,
-			atime: file.mtime,
-			ctime: file.ctime,
-			birthtime: file.ctime,
+			atime: file.atime,
+			ctime: file.mtime,
+			birthtime: file.mtime,
 			size: file.size,
 			mode,
 

@@ -1,5 +1,6 @@
 import adler32 from 'adler-32';
 import { Reader } from './reader';
+import xml2js from 'xml2js';
 
 
 export function ComputeAdler32(data: Buffer): number {
@@ -28,4 +29,75 @@ export async function CheckAllZeros(reader: Reader, count: number): Promise<bool
  */
 export function ToArrayBuffer(buf: Buffer): ArrayBuffer {
 	return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+}
+
+
+
+export async function ParseXML(str: string): Promise<any> {
+
+	let obj = await new Promise((res, rej) => {
+		xml2js.parseString(str, (err, r) => {
+			if(err) { rej(err); }
+			else { res(r); }
+		})
+	})
+
+	return obj;
+}
+
+/**
+ * Ensures that an object only has exactly the given keys and no more/no-less
+ */
+export async function AssertKeys(obj: any, targetKeys: string[]) {
+	let curKeys = Object.keys(obj);
+	curKeys.sort();
+	
+	targetKeys = targetKeys.slice();
+	targetKeys.sort();
+
+	let i = 0;
+	let j = 0;
+
+	let unknown = [];
+	let missing = [];
+
+	while(i < curKeys.length && j < targetKeys.length) {
+		if(curKeys[i] === targetKeys[j]) {
+			i++;
+			j++;
+		}
+		else if(curKeys[i] < targetKeys[j]) {
+			unknown.push(curKeys[i]);
+			i++;
+		}
+		else { // if(curKeys[i] > targetKeys[j]) {
+			missing.push(targetKeys[j]);
+			j++;
+		}
+	}
+
+	if(i < curKeys.length || unknown.length > 0) {
+		throw new Error('Unknown keys in object: ' + JSON.stringify(curKeys.slice(i).concat(unknown)));
+	}
+
+	if(j < targetKeys.length || missing.length > 0) {
+		throw new Error('Missing keys in object: ' + JSON.stringify(targetKeys.slice(j).concat(missing)));
+	}
+
+}
+
+
+const UUID_REGEX = /^([0-9A-z]{8})-([0-9A-z]{4})-([0-9A-z]{4})-([0-9A-z]{4})-([0-9A-z]{12})$/;
+
+
+export function AssertValidUUID(str: string) {
+	if(!UUID_REGEX.exec(str)) {
+		throw new Error('Not a valid uuid: ' + str);
+	}
+}
+
+export function AssertValidNumber(str: string) {
+	if(!(/^[0-9]+$/).exec(str)) {
+		throw new Error('Not a valid number');
+	}
 }

@@ -2,10 +2,10 @@ import Volume, { VolumeVersion } from '../volume';
 import { Box, BoxHandle, ReadBox } from './box';
 import { ReadRecord, ReadChunkHeader, ReadAllBoxes } from './record';
 import { ReadCompressedStream } from '../compression';
-import { MacVolumeMetaFile } from './meta';
 import assert from 'assert';
-import { DataViewReader, ReaderEndian } from '../reader';
+import { DataViewReader, ReaderEndian, Reader } from '../reader';
 import { CheckAllZeros } from '../utils';
+import { VolumeHeader } from '../volume';
 
 
 /**
@@ -13,10 +13,10 @@ import { CheckAllZeros } from '../utils';
  */
 export default class MacVolume extends Volume {
 	
-	static _generator() { return new MacVolume(); }
+	public static async OpenImpl(fileName: string, reader: Reader, header: VolumeHeader) {
+		return new MacVolume(fileName, reader, header);
+	}
 
-
-	public metaFile: MacVolumeMetaFile;
 
 	/**
 	 * Gets the starting offset of actual records in this file
@@ -67,6 +67,9 @@ export default class MacVolume extends Volume {
 	}
 
 
+
+	// XXX: We want to support better decompression of all of this stuff for viewing purposes
+	// And support an adaptive parser which parses and layers and only fails specific pieces of the hierarchy
 	/**
 	 * Reads every single record/box in the file from the beginning to the end
 	 * NOTE: Not advisable for large archives as this will store it all in memory
@@ -121,6 +124,6 @@ export default class MacVolume extends Volume {
 
 }
 
-Volume._AddType(VolumeVersion.Mac, MacVolume._generator);
+Volume.AddType(VolumeVersion.Mac, MacVolume.OpenImpl);
 
 
