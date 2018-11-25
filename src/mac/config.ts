@@ -11,15 +11,22 @@ export async function ParseConfigXML(str: string): Promise<SliceConfig> {
 	obj = obj['MetaInfo'];
 
 	// TODO: Some other parameters are optional?
-	AssertKeys(obj, ['IncludePath', 'MachineId']);
+	AssertKeys(obj, ['IncludePath', 'MachineId'], true);
 
-
-	assert(obj['IncludePath'] instanceof Array);
-	for(var p of obj['IncludePath']) {
-		assert(typeof(p) === 'string');
+	if(!obj['MachineId']) {
+		throw new Error('Missing machine id');
 	}
 
-	let incs: string[] = obj['IncludePath'];
+	let incs: string[]|undefined;
+	
+	if(obj['IncludePath']) {
+		assert(obj['IncludePath'] instanceof Array);
+		for(var p of obj['IncludePath']) {
+			assert(typeof(p) === 'string');
+		}
+
+		incs = obj['IncludePath'];
+	}
 
 
 	assert(obj['MachineId'] instanceof Array);

@@ -15,6 +15,7 @@ export interface SliceConfig {
 	machine_id?: string; /**< Known in windows as a 'computer_id' */
 
 	// Mainly present on Mac backups
+	// NOTE: For full-disk backups, these may not be present
 	includePaths?: string[];
 	excludePaths?: string[];
 

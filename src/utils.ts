@@ -48,7 +48,7 @@ export async function ParseXML(str: string): Promise<any> {
 /**
  * Ensures that an object only has exactly the given keys and no more/no-less
  */
-export async function AssertKeys(obj: any, targetKeys: string[]) {
+export function AssertKeys(obj: any, targetKeys: string[], allOptional?: boolean) {
 	let curKeys = Object.keys(obj);
 	curKeys.sort();
 	
@@ -80,7 +80,7 @@ export async function AssertKeys(obj: any, targetKeys: string[]) {
 		throw new Error('Unknown keys in object: ' + JSON.stringify(curKeys.slice(i).concat(unknown)));
 	}
 
-	if(j < targetKeys.length || missing.length > 0) {
+	if(j < targetKeys.length || missing.length > 0 && !allOptional) {
 		throw new Error('Missing keys in object: ' + JSON.stringify(targetKeys.slice(j).concat(missing)));
 	}
 
